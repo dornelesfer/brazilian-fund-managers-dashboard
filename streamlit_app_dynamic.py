@@ -64,18 +64,54 @@ def download_cvm_data(year_month):
         return None
 
 @st.cache_data
-def load_static_data():
-    """Load static data (fund registry and manager registry)"""
+def download_static_data():
+    """Download static data (fund registry and manager registry) from CVM"""
     try:
-        # Load Fund Registry
-        fund_df = pd.read_csv('registro_fundo.csv', sep=';', encoding='latin-1')
+        # Fund Registry URL
+        fund_url = "https://dados.cvm.gov.br/dados/FI/CAD/DADOS/registro_fundo_classe.zip"
         
-        # Load Manager Registry (PJ - Legal entities)
-        manager_df = pd.read_csv('cad_adm_cart_pj.csv', sep=';', encoding='latin-1')
+        # Manager Registry URL (PJ - Legal entities)
+        manager_url = "https://dados.cvm.gov.br/dados/ADM_CART/CAD/DADOS/cad_adm_cart.zip"
         
+        # Download Fund Registry
+        st.sidebar.write("📥 Downloading Fund Registry...")
+        fund_response = requests.get(fund_url, timeout=60)
+        if fund_response.status_code != 200:
+            st.error(f"Failed to download Fund Registry: HTTP {fund_response.status_code}")
+            return None, None
+        
+        # Extract Fund Registry
+        with zipfile.ZipFile(io.BytesIO(fund_response.content)) as zip_file:
+            fund_files = [f for f in zip_file.namelist() if f.endswith('.csv')]
+            if not fund_files:
+                st.error("No CSV files found in Fund Registry zip")
+                return None, None
+            
+            with zip_file.open(fund_files[0]) as f:
+                fund_df = pd.read_csv(f, sep=';', encoding='latin-1')
+        
+        # Download Manager Registry
+        st.sidebar.write("📥 Downloading Manager Registry...")
+        manager_response = requests.get(manager_url, timeout=60)
+        if manager_response.status_code != 200:
+            st.error(f"Failed to download Manager Registry: HTTP {manager_response.status_code}")
+            return None, None
+        
+        # Extract Manager Registry
+        with zipfile.ZipFile(io.BytesIO(manager_response.content)) as zip_file:
+            manager_files = [f for f in zip_file.namelist() if f.endswith('.csv') and 'pj' in f.lower()]
+            if not manager_files:
+                st.error("No PJ CSV files found in Manager Registry zip")
+                return None, None
+            
+            with zip_file.open(manager_files[0]) as f:
+                manager_df = pd.read_csv(f, sep=';', encoding='latin-1')
+        
+        st.sidebar.write("✅ Static data downloaded successfully!")
         return fund_df, manager_df
-    except FileNotFoundError as e:
-        st.error(f"Required data file not found: {e}")
+        
+    except Exception as e:
+        st.error(f"Error downloading static data: {str(e)}")
         return None, None
 
 def process_cda_data(cda_zip_content, fund_df, manager_df, investment_types=None):
@@ -346,10 +382,11 @@ def main():
     st.markdown('<h1 class="main-header">🇧🇷 Brazilian Fund Managers - Offshore Assets Analysis</h1>', unsafe_allow_html=True)
     
     # Load static data
-    fund_df, manager_df = load_static_data()
+    with st.spinner("Loading required data files..."):
+        fund_df, manager_df = download_static_data()
     
     if fund_df is None or manager_df is None:
-        st.error("Failed to load required data files. Please ensure registro_fundo.csv and cad_adm_cart_pj.csv are available.")
+        st.error("Failed to load required data files. Please check your internet connection and try again.")
         st.stop()
     
     # Sidebar filters
