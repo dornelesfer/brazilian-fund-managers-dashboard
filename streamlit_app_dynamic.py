@@ -95,7 +95,18 @@ def download_static_data():
                 for encoding in encodings:
                     try:
                         f.seek(0)
-                        fund_df = pd.read_csv(f, sep=';', encoding=encoding, low_memory=False, on_bad_lines='skip', quoting=1)
+                        # Try with more robust CSV parsing options
+                        fund_df = pd.read_csv(
+                            f, 
+                            sep=';', 
+                            encoding=encoding, 
+                            low_memory=False, 
+                            on_bad_lines='skip', 
+                            quoting=1,
+                            skip_blank_lines=True,
+                            dtype=str,  # Read all as strings to avoid parsing issues
+                            na_filter=False  # Don't convert to NaN
+                        )
                         st.sidebar.write(f"✅ Fund Registry loaded successfully with {encoding} encoding")
                         break
                     except Exception as e:
@@ -103,8 +114,24 @@ def download_static_data():
                         continue
                 
                 if fund_df is None:
-                    st.error("Failed to parse Fund Registry with any encoding")
-                    return None, None
+                    # Last resort: try reading with error_bad_lines=False (deprecated but more permissive)
+                    st.sidebar.write("🔄 Trying fallback method for Fund Registry...")
+                    try:
+                        f.seek(0)
+                        fund_df = pd.read_csv(
+                            f, 
+                            sep=';', 
+                            encoding='latin-1', 
+                            low_memory=False, 
+                            error_bad_lines=False,  # Skip bad lines
+                            warn_bad_lines=False,
+                            dtype=str,
+                            na_filter=False
+                        )
+                        st.sidebar.write("✅ Fund Registry loaded with fallback method")
+                    except Exception as e:
+                        st.error(f"Failed to parse Fund Registry with fallback method: {str(e)}")
+                        return None, None
         
         # Download Manager Registry
         st.sidebar.write("📥 Downloading Manager Registry...")
@@ -128,7 +155,18 @@ def download_static_data():
                 for encoding in encodings:
                     try:
                         f.seek(0)
-                        manager_df = pd.read_csv(f, sep=';', encoding=encoding, low_memory=False, on_bad_lines='skip', quoting=1)
+                        # Try with more robust CSV parsing options
+                        manager_df = pd.read_csv(
+                            f, 
+                            sep=';', 
+                            encoding=encoding, 
+                            low_memory=False, 
+                            on_bad_lines='skip', 
+                            quoting=1,
+                            skip_blank_lines=True,
+                            dtype=str,  # Read all as strings to avoid parsing issues
+                            na_filter=False  # Don't convert to NaN
+                        )
                         st.sidebar.write(f"✅ Manager Registry loaded successfully with {encoding} encoding")
                         break
                     except Exception as e:
@@ -136,8 +174,24 @@ def download_static_data():
                         continue
                 
                 if manager_df is None:
-                    st.error("Failed to parse Manager Registry with any encoding")
-                    return None, None
+                    # Last resort: try reading with error_bad_lines=False (deprecated but more permissive)
+                    st.sidebar.write("🔄 Trying fallback method for Manager Registry...")
+                    try:
+                        f.seek(0)
+                        manager_df = pd.read_csv(
+                            f, 
+                            sep=';', 
+                            encoding='latin-1', 
+                            low_memory=False, 
+                            error_bad_lines=False,  # Skip bad lines
+                            warn_bad_lines=False,
+                            dtype=str,
+                            na_filter=False
+                        )
+                        st.sidebar.write("✅ Manager Registry loaded with fallback method")
+                    except Exception as e:
+                        st.error(f"Failed to parse Manager Registry with fallback method: {str(e)}")
+                        return None, None
         
         st.sidebar.write("✅ Static data downloaded successfully!")
         return fund_df, manager_df
@@ -166,7 +220,18 @@ def process_cda_data(cda_zip_content, fund_df, manager_df, investment_types=None
                 for encoding in encodings:
                     try:
                         f.seek(0)
-                        cda_df = pd.read_csv(f, sep=';', encoding=encoding, low_memory=False, on_bad_lines='skip', quoting=1)
+                        # Try with more robust CSV parsing options
+                        cda_df = pd.read_csv(
+                            f, 
+                            sep=';', 
+                            encoding=encoding, 
+                            low_memory=False, 
+                            on_bad_lines='skip', 
+                            quoting=1,
+                            skip_blank_lines=True,
+                            dtype=str,  # Read all as strings to avoid parsing issues
+                            na_filter=False  # Don't convert to NaN
+                        )
                         st.sidebar.write(f"✅ CDA data loaded successfully with {encoding} encoding")
                         break
                     except Exception as e:
@@ -174,8 +239,24 @@ def process_cda_data(cda_zip_content, fund_df, manager_df, investment_types=None
                         continue
                 
                 if cda_df is None:
-                    st.error("Failed to parse CDA data with any encoding")
-                    return pd.DataFrame()
+                    # Last resort: try reading with error_bad_lines=False (deprecated but more permissive)
+                    st.sidebar.write("🔄 Trying fallback method for CDA data...")
+                    try:
+                        f.seek(0)
+                        cda_df = pd.read_csv(
+                            f, 
+                            sep=';', 
+                            encoding='latin-1', 
+                            low_memory=False, 
+                            error_bad_lines=False,  # Skip bad lines
+                            warn_bad_lines=False,
+                            dtype=str,
+                            na_filter=False
+                        )
+                        st.sidebar.write("✅ CDA data loaded with fallback method")
+                    except Exception as e:
+                        st.error(f"Failed to parse CDA data with fallback method: {str(e)}")
+                        return pd.DataFrame()
         
         # Debug: Show available columns
         st.sidebar.write(f"CDA columns: {list(cda_df.columns)}")
