@@ -88,17 +88,23 @@ def download_static_data():
                 return None, None
             
             with zip_file.open(fund_files[0]) as f:
-                try:
-                    fund_df = pd.read_csv(f, sep=';', encoding='latin-1', low_memory=False, on_bad_lines='skip')
-                except Exception as e:
-                    st.error(f"Error parsing Fund Registry CSV: {str(e)}")
-                    # Try with different encoding
-                    f.seek(0)
+                # Try multiple encoding options
+                encodings = ['latin-1', 'cp1252', 'iso-8859-1', 'utf-8', 'utf-8-sig']
+                fund_df = None
+                
+                for encoding in encodings:
                     try:
-                        fund_df = pd.read_csv(f, sep=';', encoding='utf-8', low_memory=False, on_bad_lines='skip')
-                    except Exception as e2:
-                        st.error(f"Error parsing Fund Registry with UTF-8: {str(e2)}")
-                        return None, None
+                        f.seek(0)
+                        fund_df = pd.read_csv(f, sep=';', encoding=encoding, low_memory=False, on_bad_lines='skip', quoting=1)
+                        st.sidebar.write(f"✅ Fund Registry loaded successfully with {encoding} encoding")
+                        break
+                    except Exception as e:
+                        st.sidebar.write(f"❌ Failed with {encoding}: {str(e)[:100]}...")
+                        continue
+                
+                if fund_df is None:
+                    st.error("Failed to parse Fund Registry with any encoding")
+                    return None, None
         
         # Download Manager Registry
         st.sidebar.write("📥 Downloading Manager Registry...")
@@ -115,17 +121,23 @@ def download_static_data():
                 return None, None
             
             with zip_file.open(manager_files[0]) as f:
-                try:
-                    manager_df = pd.read_csv(f, sep=';', encoding='latin-1', low_memory=False, on_bad_lines='skip')
-                except Exception as e:
-                    st.error(f"Error parsing Manager Registry CSV: {str(e)}")
-                    # Try with different encoding
-                    f.seek(0)
+                # Try multiple encoding options
+                encodings = ['latin-1', 'cp1252', 'iso-8859-1', 'utf-8', 'utf-8-sig']
+                manager_df = None
+                
+                for encoding in encodings:
                     try:
-                        manager_df = pd.read_csv(f, sep=';', encoding='utf-8', low_memory=False, on_bad_lines='skip')
-                    except Exception as e2:
-                        st.error(f"Error parsing Manager Registry with UTF-8: {str(e2)}")
-                        return None, None
+                        f.seek(0)
+                        manager_df = pd.read_csv(f, sep=';', encoding=encoding, low_memory=False, on_bad_lines='skip', quoting=1)
+                        st.sidebar.write(f"✅ Manager Registry loaded successfully with {encoding} encoding")
+                        break
+                    except Exception as e:
+                        st.sidebar.write(f"❌ Failed with {encoding}: {str(e)[:100]}...")
+                        continue
+                
+                if manager_df is None:
+                    st.error("Failed to parse Manager Registry with any encoding")
+                    return None, None
         
         st.sidebar.write("✅ Static data downloaded successfully!")
         return fund_df, manager_df
@@ -147,17 +159,23 @@ def process_cda_data(cda_zip_content, fund_df, manager_df, investment_types=None
             
             # Read Bloco 7 data
             with zip_file.open(bloco7_files[0]) as f:
-                try:
-                    cda_df = pd.read_csv(f, sep=';', encoding='latin-1', low_memory=False, on_bad_lines='skip')
-                except Exception as e:
-                    st.error(f"Error parsing CDA CSV: {str(e)}")
-                    # Try with different encoding
-                    f.seek(0)
+                # Try multiple encoding options
+                encodings = ['latin-1', 'cp1252', 'iso-8859-1', 'utf-8', 'utf-8-sig']
+                cda_df = None
+                
+                for encoding in encodings:
                     try:
-                        cda_df = pd.read_csv(f, sep=';', encoding='utf-8', low_memory=False, on_bad_lines='skip')
-                    except Exception as e2:
-                        st.error(f"Error parsing CDA with UTF-8: {str(e2)}")
-                        return pd.DataFrame()
+                        f.seek(0)
+                        cda_df = pd.read_csv(f, sep=';', encoding=encoding, low_memory=False, on_bad_lines='skip', quoting=1)
+                        st.sidebar.write(f"✅ CDA data loaded successfully with {encoding} encoding")
+                        break
+                    except Exception as e:
+                        st.sidebar.write(f"❌ Failed with {encoding}: {str(e)[:100]}...")
+                        continue
+                
+                if cda_df is None:
+                    st.error("Failed to parse CDA data with any encoding")
+                    return pd.DataFrame()
         
         # Debug: Show available columns
         st.sidebar.write(f"CDA columns: {list(cda_df.columns)}")
