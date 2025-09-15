@@ -123,8 +123,7 @@ def download_static_data():
                             sep=';', 
                             encoding='latin-1', 
                             low_memory=False, 
-                            error_bad_lines=False,  # Skip bad lines
-                            warn_bad_lines=False,
+                            on_bad_lines='skip',  # Skip bad lines (updated parameter)
                             dtype=str,
                             na_filter=False
                         )
@@ -183,8 +182,7 @@ def download_static_data():
                             sep=';', 
                             encoding='latin-1', 
                             low_memory=False, 
-                            error_bad_lines=False,  # Skip bad lines
-                            warn_bad_lines=False,
+                            on_bad_lines='skip',  # Skip bad lines (updated parameter)
                             dtype=str,
                             na_filter=False
                         )
@@ -248,8 +246,7 @@ def process_cda_data(cda_zip_content, fund_df, manager_df, investment_types=None
                             sep=';', 
                             encoding='latin-1', 
                             low_memory=False, 
-                            error_bad_lines=False,  # Skip bad lines
-                            warn_bad_lines=False,
+                            on_bad_lines='skip',  # Skip bad lines (updated parameter)
                             dtype=str,
                             na_filter=False
                         )
