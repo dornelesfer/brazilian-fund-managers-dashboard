@@ -114,22 +114,36 @@ def download_static_data():
                         continue
                 
                 if fund_df is None:
-                    # Last resort: try reading with error_bad_lines=False (deprecated but more permissive)
-                    st.sidebar.write("🔄 Trying fallback method for Fund Registry...")
+                    # Last resort: try reading line by line to handle severely corrupted files
+                    st.sidebar.write("🔄 Trying line-by-line parsing for Fund Registry...")
                     try:
                         f.seek(0)
-                        fund_df = pd.read_csv(
-                            f, 
-                            sep=';', 
-                            encoding='latin-1', 
-                            low_memory=False, 
-                            on_bad_lines='skip',  # Skip bad lines (updated parameter)
-                            dtype=str,
-                            na_filter=False
-                        )
-                        st.sidebar.write("✅ Fund Registry loaded with fallback method")
+                        lines = []
+                        for i, line in enumerate(f):
+                            try:
+                                # Decode line and check if it's valid
+                                decoded_line = line.decode('latin-1')
+                                # Skip lines that are too short or have obvious issues
+                                if len(decoded_line.strip()) > 10 and ';' in decoded_line:
+                                    lines.append(decoded_line.strip())
+                            except:
+                                # Skip problematic lines
+                                continue
+                            # Limit to first 1000 lines to avoid memory issues
+                            if i > 1000:
+                                break
+                        
+                        if lines:
+                            # Create DataFrame from valid lines
+                            from io import StringIO
+                            csv_content = '\n'.join(lines)
+                            fund_df = pd.read_csv(StringIO(csv_content), sep=';', dtype=str, na_filter=False)
+                            st.sidebar.write(f"✅ Fund Registry loaded with line-by-line method ({len(fund_df)} rows)")
+                        else:
+                            st.error("No valid lines found in Fund Registry")
+                            return None, None
                     except Exception as e:
-                        st.error(f"Failed to parse Fund Registry with fallback method: {str(e)}")
+                        st.error(f"Failed to parse Fund Registry with line-by-line method: {str(e)}")
                         return None, None
         
         # Download Manager Registry
@@ -173,22 +187,36 @@ def download_static_data():
                         continue
                 
                 if manager_df is None:
-                    # Last resort: try reading with error_bad_lines=False (deprecated but more permissive)
-                    st.sidebar.write("🔄 Trying fallback method for Manager Registry...")
+                    # Last resort: try reading line by line to handle severely corrupted files
+                    st.sidebar.write("🔄 Trying line-by-line parsing for Manager Registry...")
                     try:
                         f.seek(0)
-                        manager_df = pd.read_csv(
-                            f, 
-                            sep=';', 
-                            encoding='latin-1', 
-                            low_memory=False, 
-                            on_bad_lines='skip',  # Skip bad lines (updated parameter)
-                            dtype=str,
-                            na_filter=False
-                        )
-                        st.sidebar.write("✅ Manager Registry loaded with fallback method")
+                        lines = []
+                        for i, line in enumerate(f):
+                            try:
+                                # Decode line and check if it's valid
+                                decoded_line = line.decode('latin-1')
+                                # Skip lines that are too short or have obvious issues
+                                if len(decoded_line.strip()) > 10 and ';' in decoded_line:
+                                    lines.append(decoded_line.strip())
+                            except:
+                                # Skip problematic lines
+                                continue
+                            # Limit to first 1000 lines to avoid memory issues
+                            if i > 1000:
+                                break
+                        
+                        if lines:
+                            # Create DataFrame from valid lines
+                            from io import StringIO
+                            csv_content = '\n'.join(lines)
+                            manager_df = pd.read_csv(StringIO(csv_content), sep=';', dtype=str, na_filter=False)
+                            st.sidebar.write(f"✅ Manager Registry loaded with line-by-line method ({len(manager_df)} rows)")
+                        else:
+                            st.error("No valid lines found in Manager Registry")
+                            return None, None
                     except Exception as e:
-                        st.error(f"Failed to parse Manager Registry with fallback method: {str(e)}")
+                        st.error(f"Failed to parse Manager Registry with line-by-line method: {str(e)}")
                         return None, None
         
         st.sidebar.write("✅ Static data downloaded successfully!")
@@ -237,22 +265,36 @@ def process_cda_data(cda_zip_content, fund_df, manager_df, investment_types=None
                         continue
                 
                 if cda_df is None:
-                    # Last resort: try reading with error_bad_lines=False (deprecated but more permissive)
-                    st.sidebar.write("🔄 Trying fallback method for CDA data...")
+                    # Last resort: try reading line by line to handle severely corrupted files
+                    st.sidebar.write("🔄 Trying line-by-line parsing for CDA data...")
                     try:
                         f.seek(0)
-                        cda_df = pd.read_csv(
-                            f, 
-                            sep=';', 
-                            encoding='latin-1', 
-                            low_memory=False, 
-                            on_bad_lines='skip',  # Skip bad lines (updated parameter)
-                            dtype=str,
-                            na_filter=False
-                        )
-                        st.sidebar.write("✅ CDA data loaded with fallback method")
+                        lines = []
+                        for i, line in enumerate(f):
+                            try:
+                                # Decode line and check if it's valid
+                                decoded_line = line.decode('latin-1')
+                                # Skip lines that are too short or have obvious issues
+                                if len(decoded_line.strip()) > 10 and ';' in decoded_line:
+                                    lines.append(decoded_line.strip())
+                            except:
+                                # Skip problematic lines
+                                continue
+                            # Limit to first 2000 lines to avoid memory issues
+                            if i > 2000:
+                                break
+                        
+                        if lines:
+                            # Create DataFrame from valid lines
+                            from io import StringIO
+                            csv_content = '\n'.join(lines)
+                            cda_df = pd.read_csv(StringIO(csv_content), sep=';', dtype=str, na_filter=False)
+                            st.sidebar.write(f"✅ CDA data loaded with line-by-line method ({len(cda_df)} rows)")
+                        else:
+                            st.error("No valid lines found in CDA data")
+                            return pd.DataFrame()
                     except Exception as e:
-                        st.error(f"Failed to parse CDA data with fallback method: {str(e)}")
+                        st.error(f"Failed to parse CDA data with line-by-line method: {str(e)}")
                         return pd.DataFrame()
         
         # Debug: Show available columns
