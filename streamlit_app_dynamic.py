@@ -88,7 +88,17 @@ def download_static_data():
                 return None, None
             
             with zip_file.open(fund_files[0]) as f:
-                fund_df = pd.read_csv(f, sep=';', encoding='latin-1')
+                try:
+                    fund_df = pd.read_csv(f, sep=';', encoding='latin-1', low_memory=False, on_bad_lines='skip')
+                except Exception as e:
+                    st.error(f"Error parsing Fund Registry CSV: {str(e)}")
+                    # Try with different encoding
+                    f.seek(0)
+                    try:
+                        fund_df = pd.read_csv(f, sep=';', encoding='utf-8', low_memory=False, on_bad_lines='skip')
+                    except Exception as e2:
+                        st.error(f"Error parsing Fund Registry with UTF-8: {str(e2)}")
+                        return None, None
         
         # Download Manager Registry
         st.sidebar.write("📥 Downloading Manager Registry...")
@@ -105,7 +115,17 @@ def download_static_data():
                 return None, None
             
             with zip_file.open(manager_files[0]) as f:
-                manager_df = pd.read_csv(f, sep=';', encoding='latin-1')
+                try:
+                    manager_df = pd.read_csv(f, sep=';', encoding='latin-1', low_memory=False, on_bad_lines='skip')
+                except Exception as e:
+                    st.error(f"Error parsing Manager Registry CSV: {str(e)}")
+                    # Try with different encoding
+                    f.seek(0)
+                    try:
+                        manager_df = pd.read_csv(f, sep=';', encoding='utf-8', low_memory=False, on_bad_lines='skip')
+                    except Exception as e2:
+                        st.error(f"Error parsing Manager Registry with UTF-8: {str(e2)}")
+                        return None, None
         
         st.sidebar.write("✅ Static data downloaded successfully!")
         return fund_df, manager_df
@@ -127,7 +147,17 @@ def process_cda_data(cda_zip_content, fund_df, manager_df, investment_types=None
             
             # Read Bloco 7 data
             with zip_file.open(bloco7_files[0]) as f:
-                cda_df = pd.read_csv(f, sep=';', encoding='latin-1')
+                try:
+                    cda_df = pd.read_csv(f, sep=';', encoding='latin-1', low_memory=False, on_bad_lines='skip')
+                except Exception as e:
+                    st.error(f"Error parsing CDA CSV: {str(e)}")
+                    # Try with different encoding
+                    f.seek(0)
+                    try:
+                        cda_df = pd.read_csv(f, sep=';', encoding='utf-8', low_memory=False, on_bad_lines='skip')
+                    except Exception as e2:
+                        st.error(f"Error parsing CDA with UTF-8: {str(e2)}")
+                        return pd.DataFrame()
         
         # Debug: Show available columns
         st.sidebar.write(f"CDA columns: {list(cda_df.columns)}")
