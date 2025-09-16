@@ -306,9 +306,25 @@ def process_cda_data(cda_zip_content, fund_df, manager_df, investment_types=None
         st.sidebar.write(f"🔍 After zero filter: {len(fund_offshore)} records, columns: {list(fund_offshore.columns)}")
         
         # Cross-reference with fund registry
+        # Find the correct CNPJ column names
+        cda_cnpj_col = 'CNPJ_FUNDO_CLASSE'  # This should exist in CDA data
+        fund_cnpj_col = None
+        
+        # Look for CNPJ columns in Fund Registry
+        for col in fund_df.columns:
+            if 'CNPJ' in col.upper() and 'FUNDO' in col.upper():
+                fund_cnpj_col = col
+                break
+        
+        if not fund_cnpj_col:
+            st.error(f"CNPJ column not found in Fund Registry. Available columns: {list(fund_df.columns)}")
+            return pd.DataFrame()
+        
+        st.sidebar.write(f"Using Fund Registry CNPJ column: {fund_cnpj_col}")
+        
         # Clean CNPJs: remove all non-numeric characters and keep as STRINGS
-        fund_offshore['CNPJ_FUNDO_CLASSE_clean'] = fund_offshore['CNPJ_FUNDO_CLASSE'].astype(str).str.replace('[^0-9]', '', regex=True)
-        fund_df['CNPJ_Fundo_clean'] = fund_df['CNPJ_Fundo'].astype(str).str.replace('[^0-9]', '', regex=True)
+        fund_offshore['CNPJ_FUNDO_CLASSE_clean'] = fund_offshore[cda_cnpj_col].astype(str).str.replace('[^0-9]', '', regex=True)
+        fund_df['CNPJ_Fundo_clean'] = fund_df[fund_cnpj_col].astype(str).str.replace('[^0-9]', '', regex=True)
         
         # Keep as STRINGS - NO numeric conversion!
         fund_offshore['CNPJ_FUNDO_CLASSE_clean'] = fund_offshore['CNPJ_FUNDO_CLASSE_clean'].astype(str)
