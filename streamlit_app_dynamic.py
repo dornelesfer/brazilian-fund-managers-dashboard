@@ -311,10 +311,15 @@ def process_cda_data(cda_zip_content, fund_df, manager_df, investment_types=None
         fund_cnpj_col = None
         
         # Look for CNPJ columns in Fund Registry
-        for col in fund_df.columns:
-            if 'CNPJ' in col.upper() and 'FUNDO' in col.upper():
-                fund_cnpj_col = col
-                break
+        # The Fund Registry has different column names - prioritize CNPJ_Classe
+        if 'CNPJ_Classe' in fund_df.columns:
+            fund_cnpj_col = 'CNPJ_Classe'
+        else:
+            # Fallback to any CNPJ column
+            for col in fund_df.columns:
+                if 'CNPJ' in col.upper():
+                    fund_cnpj_col = col
+                    break
         
         if not fund_cnpj_col:
             st.error(f"CNPJ column not found in Fund Registry. Available columns: {list(fund_df.columns)}")
@@ -334,10 +339,21 @@ def process_cda_data(cda_zip_content, fund_df, manager_df, investment_types=None
         st.sidebar.write(f"CDA CNPJ samples: {fund_offshore['CNPJ_FUNDO_CLASSE_clean'].head(3).tolist()}")
         st.sidebar.write(f"Fund Registry CNPJ samples: {fund_df['CNPJ_Fundo_clean'].head(3).tolist()}")
         
+        # Check what manager-related columns are available in Fund Registry
+        manager_cols = [col for col in fund_df.columns if 'GESTOR' in col.upper() or 'ADMIN' in col.upper() or 'CPF' in col.upper() or 'CNPJ' in col.upper()]
+        st.sidebar.write(f"Manager-related columns in Fund Registry: {manager_cols}")
+        
         # Merge with fund registry to get manager CNPJ
         st.sidebar.write("🔍 Starting fund registry merge...")
+        # Use only the columns that exist
+        merge_cols = ['CNPJ_Fundo_clean']
+        if 'CPF_CNPJ_Gestor' in fund_df.columns:
+            merge_cols.append('CPF_CNPJ_Gestor')
+        if 'Gestor' in fund_df.columns:
+            merge_cols.append('Gestor')
+        
         merged_df = fund_offshore.merge(
-            fund_df[['CNPJ_Fundo_clean', 'CPF_CNPJ_Gestor', 'Gestor']], 
+            fund_df[merge_cols], 
             left_on='CNPJ_FUNDO_CLASSE_clean', 
             right_on='CNPJ_Fundo_clean', 
             how='left'
