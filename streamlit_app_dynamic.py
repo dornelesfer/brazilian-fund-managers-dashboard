@@ -14,6 +14,9 @@ import os
 import requests
 import zipfile
 import io
+import csv
+import re
+from io import StringIO
 
 # Page configuration
 st.set_page_config(
@@ -43,6 +46,92 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
+def robust_csv_parser(file_content, encoding='latin-1', sep=';'):
+    """
+    Robust CSV parser that can handle severely corrupted CSV files
+    """
+    try:
+        # Decode the content
+        if isinstance(file_content, bytes):
+            text_content = file_content.decode(encoding, errors='ignore')
+        else:
+            text_content = file_content
+        
+        # Split into lines
+        lines = text_content.split('\n')
+        
+        # Find the header line (usually the first non-empty line)
+        header_line = None
+        data_start = 0
+        for i, line in enumerate(lines):
+            if line.strip() and ';' in line:
+                header_line = line.strip()
+                data_start = i + 1
+                break
+        
+        if not header_line:
+            return pd.DataFrame()
+        
+        # Parse header
+        header_reader = csv.reader([header_line], delimiter=sep)
+        headers = next(header_reader)
+        
+        # Clean headers
+        headers = [h.strip() for h in headers]
+        
+        # Parse data rows with error handling
+        data_rows = []
+        corrupted_rows = 0
+        max_corrupted = 100  # Stop if too many corrupted rows
+        
+        for i, line in enumerate(lines[data_start:], data_start):
+            if corrupted_rows >= max_corrupted:
+                st.sidebar.write(f"⚠️ Stopping after {max_corrupted} corrupted rows")
+                break
+                
+            if not line.strip():
+                continue
+                
+            try:
+                # Try to parse the line
+                reader = csv.reader([line], delimiter=sep)
+                row = next(reader)
+                
+                # Ensure row has same number of columns as header
+                if len(row) == len(headers):
+                    data_rows.append(row)
+                elif len(row) > len(headers):
+                    # Truncate extra columns
+                    data_rows.append(row[:len(headers)])
+                else:
+                    # Pad with empty strings
+                    padded_row = row + [''] * (len(headers) - len(row))
+                    data_rows.append(padded_row)
+                    
+            except Exception as e:
+                corrupted_rows += 1
+                if corrupted_rows <= 5:  # Only show first few errors
+                    st.sidebar.write(f"⚠️ Skipping corrupted row {i}: {str(e)[:50]}...")
+                continue
+        
+        if not data_rows:
+            st.sidebar.write("❌ No valid data rows found")
+            return pd.DataFrame()
+        
+        # Create DataFrame
+        df = pd.DataFrame(data_rows, columns=headers)
+        
+        # Clean up the data
+        df = df.replace('', np.nan)
+        df = df.dropna(how='all')  # Remove completely empty rows
+        
+        st.sidebar.write(f"✅ Successfully parsed {len(df)} rows (skipped {corrupted_rows} corrupted)")
+        return df
+        
+    except Exception as e:
+        st.sidebar.write(f"❌ Robust CSV parser failed: {str(e)}")
+        return pd.DataFrame()
 
 @st.cache_data
 def download_cvm_data(year_month):
@@ -88,63 +177,18 @@ def download_static_data():
                 return None, None
             
             with zip_file.open(fund_files[0]) as f:
-                # Try multiple encoding options
-                encodings = ['latin-1', 'cp1252', 'iso-8859-1', 'utf-8', 'utf-8-sig']
-                fund_df = None
+                # Use robust CSV parser
+                st.sidebar.write("🔄 Using robust CSV parser for Fund Registry...")
+                file_content = f.read()
+                fund_df = robust_csv_parser(file_content, encoding='latin-1', sep=';')
                 
-                for encoding in encodings:
-                    try:
-                        f.seek(0)
-                        # Try with more robust CSV parsing options
-                        fund_df = pd.read_csv(
-                            f, 
-                            sep=';', 
-                            encoding=encoding, 
-                            low_memory=False, 
-                            on_bad_lines='skip', 
-                            quoting=1,
-                            skip_blank_lines=True,
-                            dtype=str,  # Read all as strings to avoid parsing issues
-                            na_filter=False  # Don't convert to NaN
-                        )
-                        st.sidebar.write(f"✅ Fund Registry loaded successfully with {encoding} encoding")
-                        break
-                    except Exception as e:
-                        st.sidebar.write(f"❌ Failed with {encoding}: {str(e)[:100]}...")
-                        continue
+                if fund_df.empty:
+                    st.sidebar.write("🔄 Trying alternative encoding...")
+                    fund_df = robust_csv_parser(file_content, encoding='cp1252', sep=';')
                 
-                if fund_df is None:
-                    # Last resort: try reading line by line to handle severely corrupted files
-                    st.sidebar.write("🔄 Trying line-by-line parsing for Fund Registry...")
-                    try:
-                        f.seek(0)
-                        lines = []
-                        for i, line in enumerate(f):
-                            try:
-                                # Decode line and check if it's valid
-                                decoded_line = line.decode('latin-1')
-                                # Skip lines that are too short or have obvious issues
-                                if len(decoded_line.strip()) > 10 and ';' in decoded_line:
-                                    lines.append(decoded_line.strip())
-                            except:
-                                # Skip problematic lines
-                                continue
-                            # Limit to first 1000 lines to avoid memory issues
-                            if i > 1000:
-                                break
-                        
-                        if lines:
-                            # Create DataFrame from valid lines
-                            from io import StringIO
-                            csv_content = '\n'.join(lines)
-                            fund_df = pd.read_csv(StringIO(csv_content), sep=';', dtype=str, na_filter=False)
-                            st.sidebar.write(f"✅ Fund Registry loaded with line-by-line method ({len(fund_df)} rows)")
-                        else:
-                            st.error("No valid lines found in Fund Registry")
-                            return None, None
-                    except Exception as e:
-                        st.error(f"Failed to parse Fund Registry with line-by-line method: {str(e)}")
-                        return None, None
+                if fund_df.empty:
+                    st.error("Failed to parse Fund Registry with robust parser")
+                    return None, None
         
         # Download Manager Registry
         st.sidebar.write("📥 Downloading Manager Registry...")
@@ -161,63 +205,18 @@ def download_static_data():
                 return None, None
             
             with zip_file.open(manager_files[0]) as f:
-                # Try multiple encoding options
-                encodings = ['latin-1', 'cp1252', 'iso-8859-1', 'utf-8', 'utf-8-sig']
-                manager_df = None
+                # Use robust CSV parser
+                st.sidebar.write("🔄 Using robust CSV parser for Manager Registry...")
+                file_content = f.read()
+                manager_df = robust_csv_parser(file_content, encoding='latin-1', sep=';')
                 
-                for encoding in encodings:
-                    try:
-                        f.seek(0)
-                        # Try with more robust CSV parsing options
-                        manager_df = pd.read_csv(
-                            f, 
-                            sep=';', 
-                            encoding=encoding, 
-                            low_memory=False, 
-                            on_bad_lines='skip', 
-                            quoting=1,
-                            skip_blank_lines=True,
-                            dtype=str,  # Read all as strings to avoid parsing issues
-                            na_filter=False  # Don't convert to NaN
-                        )
-                        st.sidebar.write(f"✅ Manager Registry loaded successfully with {encoding} encoding")
-                        break
-                    except Exception as e:
-                        st.sidebar.write(f"❌ Failed with {encoding}: {str(e)[:100]}...")
-                        continue
+                if manager_df.empty:
+                    st.sidebar.write("🔄 Trying alternative encoding...")
+                    manager_df = robust_csv_parser(file_content, encoding='cp1252', sep=';')
                 
-                if manager_df is None:
-                    # Last resort: try reading line by line to handle severely corrupted files
-                    st.sidebar.write("🔄 Trying line-by-line parsing for Manager Registry...")
-                    try:
-                        f.seek(0)
-                        lines = []
-                        for i, line in enumerate(f):
-                            try:
-                                # Decode line and check if it's valid
-                                decoded_line = line.decode('latin-1')
-                                # Skip lines that are too short or have obvious issues
-                                if len(decoded_line.strip()) > 10 and ';' in decoded_line:
-                                    lines.append(decoded_line.strip())
-                            except:
-                                # Skip problematic lines
-                                continue
-                            # Limit to first 1000 lines to avoid memory issues
-                            if i > 1000:
-                                break
-                        
-                        if lines:
-                            # Create DataFrame from valid lines
-                            from io import StringIO
-                            csv_content = '\n'.join(lines)
-                            manager_df = pd.read_csv(StringIO(csv_content), sep=';', dtype=str, na_filter=False)
-                            st.sidebar.write(f"✅ Manager Registry loaded with line-by-line method ({len(manager_df)} rows)")
-                        else:
-                            st.error("No valid lines found in Manager Registry")
-                            return None, None
-                    except Exception as e:
-                        st.error(f"Failed to parse Manager Registry with line-by-line method: {str(e)}")
-                        return None, None
+                if manager_df.empty:
+                    st.error("Failed to parse Manager Registry with robust parser")
+                    return None, None
         
         st.sidebar.write("✅ Static data downloaded successfully!")
         return fund_df, manager_df
@@ -239,63 +238,18 @@ def process_cda_data(cda_zip_content, fund_df, manager_df, investment_types=None
             
             # Read Bloco 7 data
             with zip_file.open(bloco7_files[0]) as f:
-                # Try multiple encoding options
-                encodings = ['latin-1', 'cp1252', 'iso-8859-1', 'utf-8', 'utf-8-sig']
-                cda_df = None
+                # Use robust CSV parser
+                st.sidebar.write("🔄 Using robust CSV parser for CDA data...")
+                file_content = f.read()
+                cda_df = robust_csv_parser(file_content, encoding='latin-1', sep=';')
                 
-                for encoding in encodings:
-                    try:
-                        f.seek(0)
-                        # Try with more robust CSV parsing options
-                        cda_df = pd.read_csv(
-                            f, 
-                            sep=';', 
-                            encoding=encoding, 
-                            low_memory=False, 
-                            on_bad_lines='skip', 
-                            quoting=1,
-                            skip_blank_lines=True,
-                            dtype=str,  # Read all as strings to avoid parsing issues
-                            na_filter=False  # Don't convert to NaN
-                        )
-                        st.sidebar.write(f"✅ CDA data loaded successfully with {encoding} encoding")
-                        break
-                    except Exception as e:
-                        st.sidebar.write(f"❌ Failed with {encoding}: {str(e)[:100]}...")
-                        continue
+                if cda_df.empty:
+                    st.sidebar.write("🔄 Trying alternative encoding...")
+                    cda_df = robust_csv_parser(file_content, encoding='cp1252', sep=';')
                 
-                if cda_df is None:
-                    # Last resort: try reading line by line to handle severely corrupted files
-                    st.sidebar.write("🔄 Trying line-by-line parsing for CDA data...")
-                    try:
-                        f.seek(0)
-                        lines = []
-                        for i, line in enumerate(f):
-                            try:
-                                # Decode line and check if it's valid
-                                decoded_line = line.decode('latin-1')
-                                # Skip lines that are too short or have obvious issues
-                                if len(decoded_line.strip()) > 10 and ';' in decoded_line:
-                                    lines.append(decoded_line.strip())
-                            except:
-                                # Skip problematic lines
-                                continue
-                            # Limit to first 2000 lines to avoid memory issues
-                            if i > 2000:
-                                break
-                        
-                        if lines:
-                            # Create DataFrame from valid lines
-                            from io import StringIO
-                            csv_content = '\n'.join(lines)
-                            cda_df = pd.read_csv(StringIO(csv_content), sep=';', dtype=str, na_filter=False)
-                            st.sidebar.write(f"✅ CDA data loaded with line-by-line method ({len(cda_df)} rows)")
-                        else:
-                            st.error("No valid lines found in CDA data")
-                            return pd.DataFrame()
-                    except Exception as e:
-                        st.error(f"Failed to parse CDA data with line-by-line method: {str(e)}")
-                        return pd.DataFrame()
+                if cda_df.empty:
+                    st.error("Failed to parse CDA data with robust parser")
+                    return pd.DataFrame()
         
         # Debug: Show available columns
         st.sidebar.write(f"CDA columns: {list(cda_df.columns)}")
