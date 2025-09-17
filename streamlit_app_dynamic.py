@@ -171,9 +171,10 @@ def download_static_data():
         
         # Extract Fund Registry
         with zipfile.ZipFile(io.BytesIO(fund_response.content)) as zip_file:
-            fund_files = [f for f in zip_file.namelist() if f.endswith('.csv')]
+            # Look for registro_fundo.csv specifically (contains fund-manager mapping)
+            fund_files = [f for f in zip_file.namelist() if f.endswith('.csv') and 'fundo' in f.lower()]
             if not fund_files:
-                st.error("No CSV files found in Fund Registry zip")
+                st.error("No fund CSV files found in Fund Registry zip")
                 return None, None
             
             with zip_file.open(fund_files[0]) as f:
@@ -228,6 +229,10 @@ def download_static_data():
 def process_cda_data(cda_zip_content, fund_df, manager_df, investment_types=None):
     """Process CDA data and cross-reference with other datasets"""
     try:
+        st.sidebar.write("🔍 Starting process_cda_data function...")
+        st.sidebar.write(f"🔍 Fund_df shape: {fund_df.shape if fund_df is not None else 'None'}")
+        st.sidebar.write(f"🔍 Manager_df shape: {manager_df.shape if manager_df is not None else 'None'}")
+        st.sidebar.write(f"🔍 Investment types: {investment_types}")
         # Extract CDA data from zip
         with zipfile.ZipFile(io.BytesIO(cda_zip_content)) as zip_file:
             # Find the Bloco 7 file
@@ -278,22 +283,25 @@ def process_cda_data(cda_zip_content, fund_df, manager_df, investment_types=None
             if col in offshore_df.columns:
                 offshore_df[col] = pd.to_numeric(offshore_df[col], errors='coerce')
         
-        # Check if DENOM_SOCIAL exists in offshore data after numeric conversion
-        st.sidebar.write(f"🔍 DENOM_SOCIAL exists after numeric conversion: {'DENOM_SOCIAL' in offshore_df.columns}")
-        if 'DENOM_SOCIAL' not in offshore_df.columns:
-            st.error("DENOM_SOCIAL column not found in offshore data after filtering")
-            st.sidebar.write(f"Available columns: {list(offshore_df.columns)}")
-            return pd.DataFrame()
-        
         # Group by fund CNPJ to get total offshore assets per fund
         try:
             st.sidebar.write("🔍 Starting groupby operation...")
-            fund_offshore = offshore_df.groupby('CNPJ_FUNDO_CLASSE').agg({
+            
+            # Build aggregation dictionary dynamically based on available columns
+            agg_dict = {
                 'VL_MERC_POS_FINAL': 'sum',
-                'VL_CUSTO_POS_FINAL': 'sum',
-                'DENOM_SOCIAL': 'first',  # This is the fund name from CDA
-                'DT_COMPTC': 'first'
-            }).reset_index()
+                'VL_CUSTO_POS_FINAL': 'sum'
+            }
+            
+            # Add optional columns if they exist
+            if 'DENOM_SOCIAL' in offshore_df.columns:
+                agg_dict['DENOM_SOCIAL'] = 'first'  # This is the fund name from CDA
+                st.sidebar.write("🔍 Including DENOM_SOCIAL (fund name) in groupby")
+            if 'DT_COMPTC' in offshore_df.columns:
+                agg_dict['DT_COMPTC'] = 'first'
+                st.sidebar.write("🔍 Including DT_COMPTC in groupby")
+            
+            fund_offshore = offshore_df.groupby('CNPJ_FUNDO_CLASSE').agg(agg_dict).reset_index()
             st.sidebar.write(f"🔍 Groupby successful! Columns: {list(fund_offshore.columns)}")
             st.sidebar.write(f"🔍 DENOM_SOCIAL exists after groupby: {'DENOM_SOCIAL' in fund_offshore.columns}")
         except Exception as e:
@@ -311,8 +319,10 @@ def process_cda_data(cda_zip_content, fund_df, manager_df, investment_types=None
         fund_cnpj_col = None
         
         # Look for CNPJ columns in Fund Registry
-        # The Fund Registry has different column names - prioritize CNPJ_Classe
-        if 'CNPJ_Classe' in fund_df.columns:
+        # The registro_fundo.csv should have CNPJ_Fundo
+        if 'CNPJ_Fundo' in fund_df.columns:
+            fund_cnpj_col = 'CNPJ_Fundo'
+        elif 'CNPJ_Classe' in fund_df.columns:
             fund_cnpj_col = 'CNPJ_Classe'
         else:
             # Fallback to any CNPJ column
@@ -331,6 +341,10 @@ def process_cda_data(cda_zip_content, fund_df, manager_df, investment_types=None
         fund_offshore['CNPJ_FUNDO_CLASSE_clean'] = fund_offshore[cda_cnpj_col].astype(str).str.replace('[^0-9]', '', regex=True)
         fund_df['CNPJ_Fundo_clean'] = fund_df[fund_cnpj_col].astype(str).str.replace('[^0-9]', '', regex=True)
         
+        # Pad CNPJs to 14 characters with leading zeros
+        fund_offshore['CNPJ_FUNDO_CLASSE_clean'] = fund_offshore['CNPJ_FUNDO_CLASSE_clean'].str.zfill(14)
+        fund_df['CNPJ_Fundo_clean'] = fund_df['CNPJ_Fundo_clean'].str.zfill(14)
+        
         # Keep as STRINGS - NO numeric conversion!
         fund_offshore['CNPJ_FUNDO_CLASSE_clean'] = fund_offshore['CNPJ_FUNDO_CLASSE_clean'].astype(str)
         fund_df['CNPJ_Fundo_clean'] = fund_df['CNPJ_Fundo_clean'].astype(str)
@@ -345,7 +359,7 @@ def process_cda_data(cda_zip_content, fund_df, manager_df, investment_types=None
         
         # Merge with fund registry to get manager CNPJ
         st.sidebar.write("🔍 Starting fund registry merge...")
-        # Use only the columns that exist
+        # Use the correct columns for CNPJ chain: CNPJ_FUNDO_CLASSE → CNPJ_Fundo → CPF_CNPJ_Gestor
         merge_cols = ['CNPJ_Fundo_clean']
         if 'CPF_CNPJ_Gestor' in fund_df.columns:
             merge_cols.append('CPF_CNPJ_Gestor')
@@ -359,75 +373,140 @@ def process_cda_data(cda_zip_content, fund_df, manager_df, investment_types=None
             how='left'
         )
         st.sidebar.write(f"🔍 Fund registry merge complete! Columns: {list(merged_df.columns)}")
-        st.sidebar.write(f"🔍 DENOM_SOCIAL exists after fund merge: {'DENOM_SOCIAL' in merged_df.columns}")
+        st.sidebar.write(f"🔍 CPF_CNPJ_Gestor exists after fund merge: {'CPF_CNPJ_Gestor' in merged_df.columns}")
         
-        # Cross-reference with manager registry
-        # Clean CNPJs: remove all non-numeric characters and ensure 14 digits
-        # Keep as STRINGS throughout to avoid precision loss
+        # Now use CNPJ chain: CPF_CNPJ_Gestor → Manager Registry CNPJ
+        st.sidebar.write("🔍 Starting CNPJ-based manager registry merge...")
         
-        # Handle scientific notation first for fund registry
-        merged_df['CPF_CNPJ_Gestor_clean'] = merged_df['CPF_CNPJ_Gestor'].astype(str).apply(
-            lambda x: f"{float(x):.0f}" if 'e+' in str(x) else str(x)
-        )
-        merged_df['CPF_CNPJ_Gestor_clean'] = merged_df['CPF_CNPJ_Gestor_clean'].str.replace('[^0-9]', '', regex=True)
-        
-        manager_df['CNPJ_clean'] = manager_df['CNPJ'].astype(str).str.replace('[^0-9]', '', regex=True)
-        
-        # Fix data quality issue: Fund registry CNPJs are missing leading zeros
-        # Fund registry has 13 digits + .0, manager registry has 14 digits
-        def fix_fund_cnpj(cnpj_str):
-            if pd.isna(cnpj_str) or cnpj_str == '':
-                return cnpj_str
-            cnpj_str = str(cnpj_str)
-            # Remove decimal point and trailing zero
-            if cnpj_str.endswith('.0'):
-                cnpj_str = cnpj_str[:-2]
-            # Remove any other non-numeric characters
-            import re
-            cnpj_str = re.sub(r'[^0-9]', '', cnpj_str)
-            # If we have exactly 13 digits, add a leading zero to make it 14
-            if len(cnpj_str) == 13:
-                cnpj_str = '0' + cnpj_str
-            return cnpj_str
-        
-        merged_df['CPF_CNPJ_Gestor_clean'] = merged_df['CPF_CNPJ_Gestor_clean'].apply(fix_fund_cnpj)
-        
-        # Ensure CNPJs are exactly 14 digits (pad with zeros if needed, truncate if too long)
-        merged_df['CPF_CNPJ_Gestor_clean'] = merged_df['CPF_CNPJ_Gestor_clean'].str.zfill(14).str[:14]
-        manager_df['CNPJ_clean'] = manager_df['CNPJ_clean'].str.zfill(14).str[:14]
-        
-        # Keep as strings - NO numeric conversion!
-        merged_df['CPF_CNPJ_Gestor_clean'] = merged_df['CPF_CNPJ_Gestor_clean'].astype(str)
-        manager_df['CNPJ_clean'] = manager_df['CNPJ_clean'].astype(str)
-        
-        # Debug: Show sample CNPJs
-        st.sidebar.write(f"Gestor CNPJ samples: {merged_df['CPF_CNPJ_Gestor_clean'].dropna().head(3).tolist()}")
-        st.sidebar.write(f"Manager Registry CNPJ samples: {manager_df['CNPJ_clean'].head(3).tolist()}")
-        
-        # Check for matches (string-based)
-        gestor_cnpjs = set(merged_df['CPF_CNPJ_Gestor_clean'].dropna())
-        manager_cnpjs = set(manager_df['CNPJ_clean'].dropna())
-        matches = gestor_cnpjs.intersection(manager_cnpjs)
-        st.sidebar.write(f"🔍 CNPJ matches found: {len(matches)} out of {len(gestor_cnpjs)} gestor CNPJs")
-        if len(matches) > 0:
-            st.sidebar.write(f"🔍 Sample matches: {list(matches)[:3]}")
+        # Check if we have manager CNPJ from fund registry
+        if 'CPF_CNPJ_Gestor' not in merged_df.columns:
+            st.sidebar.write("❌ CPF_CNPJ_Gestor not found in fund registry merge!")
+            st.sidebar.write(f"🔍 Available columns after fund merge: {list(merged_df.columns)}")
+            # Fallback to name-based matching
+            st.sidebar.write("🔄 Falling back to name-based matching...")
+            
+            # Look for manager name column in merged_df
+            gestor_col = None
+            for col in merged_df.columns:
+                if 'GESTOR' in col.upper():
+                    gestor_col = col
+                    break
+            
+            if gestor_col:
+                st.sidebar.write(f"✅ Found manager name column: {gestor_col}")
+                # Clean manager names for matching
+                merged_df['Gestor_clean'] = merged_df[gestor_col].astype(str).str.strip().str.upper()
+            else:
+                st.sidebar.write("❌ No manager name column found in fund registry merge")
+                # If no manager data, create dummy columns
+                merged_df['Gestor'] = 'Unknown Manager'
+                merged_df['Gestor_clean'] = 'UNKNOWN MANAGER'
+            
+            # Clean manager names for matching
+            manager_df['DENOM_SOCIAL_clean'] = manager_df['DENOM_SOCIAL'].astype(str).str.strip().str.upper()
+            
+            # Debug: Show sample names
+            st.sidebar.write(f"Gestor name samples: {merged_df['Gestor_clean'].dropna().head(3).tolist()}")
+            st.sidebar.write(f"Manager Registry name samples: {manager_df['DENOM_SOCIAL_clean'].head(3).tolist()}")
+            
+            # Check for matches (name-based)
+            gestor_names = set(merged_df['Gestor_clean'].dropna())
+            manager_names = set(manager_df['DENOM_SOCIAL_clean'].dropna())
+            matches = gestor_names.intersection(manager_names)
+            st.sidebar.write(f"🔍 Name matches found: {len(matches)} out of {len(gestor_names)} gestor names")
+            if len(matches) > 0:
+                st.sidebar.write(f"🔍 Sample matches: {list(matches)[:3]}")
+            else:
+                st.sidebar.write("❌ No name matches found between gestor and manager registries!")
+            
+            # Merge with manager registry using NAME-BASED matching
+            final_df = merged_df.merge(
+                manager_df[['DENOM_SOCIAL_clean', 'DENOM_SOCIAL', 'MUN', 'UF', 'LOGRADOURO', 'BAIRRO', 'CEP']], 
+                left_on='Gestor_clean', 
+                right_on='DENOM_SOCIAL_clean', 
+                how='left'
+            )
+            
+            # Debug: Check name-based matching results
+            name_matches = final_df['DENOM_SOCIAL'].notna().sum()
+            st.sidebar.write(f"🔍 Name-based matches found: {name_matches} out of {len(final_df)} records")
+            if name_matches > 0:
+                st.sidebar.write(f"🔍 Sample matched manager names: {final_df['DENOM_SOCIAL'].dropna().head(3).tolist()}")
+            else:
+                st.sidebar.write("❌ No name-based matches found - all managers will be 'Unknown Manager'")
         else:
-            st.sidebar.write("❌ No CNPJ matches found between gestor and manager registries!")
-        
-        # Merge with manager registry using NAME-BASED matching (more reliable than CNPJ)
-        st.sidebar.write("🔍 Starting manager registry merge using NAME-BASED matching...")
-        
-        # Create clean name columns for matching
-        manager_df['DENOM_SOCIAL_clean'] = manager_df['DENOM_SOCIAL'].str.strip().str.upper()
-        merged_df['Gestor_clean'] = merged_df['Gestor'].str.strip().str.upper()
-        
-        # Try name-based matching first
-        final_df = merged_df.merge(
-            manager_df[['DENOM_SOCIAL_clean', 'DENOM_SOCIAL', 'MUN', 'UF', 'LOGRADOURO', 'BAIRRO', 'CEP']], 
-            left_on='Gestor_clean', 
-            right_on='DENOM_SOCIAL_clean', 
-            how='left'
-        )
+            # Use CNPJ-based matching
+            st.sidebar.write("✅ Using CNPJ-based matching for manager registry...")
+            
+            # Clean manager CNPJs - keep as STRINGS to preserve leading zeros
+            merged_df['CPF_CNPJ_Gestor_clean'] = merged_df['CPF_CNPJ_Gestor'].astype(str).str.replace('[^0-9]', '', regex=True)
+            manager_df['CNPJ_clean'] = manager_df['CNPJ'].astype(str).str.replace('[^0-9]', '', regex=True)
+            
+            # Pad CNPJs to 14 characters with leading zeros
+            merged_df['CPF_CNPJ_Gestor_clean'] = merged_df['CPF_CNPJ_Gestor_clean'].str.zfill(14)
+            manager_df['CNPJ_clean'] = manager_df['CNPJ_clean'].str.zfill(14)
+            
+            # Keep as STRINGS - NO numeric conversion!
+            merged_df['CPF_CNPJ_Gestor_clean'] = merged_df['CPF_CNPJ_Gestor_clean'].astype(str)
+            manager_df['CNPJ_clean'] = manager_df['CNPJ_clean'].astype(str)
+            
+            # Debug: Show sample CNPJs
+            st.sidebar.write(f"Manager CNPJ samples from fund registry: {merged_df['CPF_CNPJ_Gestor_clean'].dropna().head(3).tolist()}")
+            st.sidebar.write(f"Manager Registry CNPJ samples: {manager_df['CNPJ_clean'].head(3).tolist()}")
+            
+            # Check if we have valid CNPJ values (14 digits and not all zeros)
+            gestor_cnpj_series = merged_df['CPF_CNPJ_Gestor_clean'].fillna('')
+            valid_cnpj_mask = gestor_cnpj_series.str.fullmatch(r"\d{14}") & ~gestor_cnpj_series.eq('00000000000000')
+            valid_cnpj_count = valid_cnpj_mask.sum()
+            st.sidebar.write(f"🔍 Valid (non-empty, 14-digit, non-zero) manager CNPJs: {valid_cnpj_count} out of {len(merged_df)}")
+            
+        if valid_cnpj_count > 0:
+            # Filter to rows with valid CNPJ to improve merge quality
+            merged_df_valid = merged_df.copy()
+            merged_df_valid['__valid_cnpj__'] = valid_cnpj_mask
+            
+            # Merge with manager registry using CNPJ matching, keep suffixes to avoid collisions
+            final_df = merged_df_valid.merge(
+                manager_df[['CNPJ_clean', 'DENOM_SOCIAL', 'MUN', 'UF', 'LOGRADOURO', 'BAIRRO', 'CEP']],
+                left_on='CPF_CNPJ_Gestor_clean',
+                right_on='CNPJ_clean',
+                how='left',
+                suffixes=('', '_mgr')
+            )
+            
+            # Normalize manager columns after merge
+            manager_name_source = None
+            if 'DENOM_SOCIAL_mgr' in final_df.columns:
+                manager_name_source = 'DENOM_SOCIAL_mgr'
+            elif 'DENOM_SOCIAL_y' in final_df.columns:
+                manager_name_source = 'DENOM_SOCIAL_y'
+            elif 'DENOM_SOCIAL' in final_df.columns:
+                manager_name_source = 'DENOM_SOCIAL'
+            
+            if manager_name_source is not None:
+                final_df['DENOM_SOCIAL'] = final_df[manager_name_source]
+            else:
+                final_df['DENOM_SOCIAL'] = np.nan
+            
+            # Normalize location columns (prefer manager registry values)
+            for _col in ['MUN', 'UF', 'LOGRADOURO', 'BAIRRO', 'CEP']:
+                mgr_col = f"{_col}_mgr"
+                if mgr_col in final_df.columns:
+                    final_df[_col] = final_df[mgr_col]
+            
+            # Debug: Check CNPJ matching results
+            cnpj_matches = final_df['DENOM_SOCIAL'].notna().sum()
+            st.sidebar.write(f"🔍 CNPJ-based matches found: {cnpj_matches} out of {len(final_df)} records")
+            if cnpj_matches > 0:
+                st.sidebar.write(f"🔍 Sample matched manager names: {final_df['DENOM_SOCIAL'].dropna().head(3).tolist()}")
+            else:
+                st.sidebar.write("❌ No CNPJ matches found - falling back to name-based matching")
+                # Fall back to name-based matching
+                final_df = _fallback_to_name_matching(merged_df, manager_df)
+        else:
+            st.sidebar.write("❌ No valid manager CNPJs found - falling back to name-based matching")
+            # Fall back to name-based matching
+            final_df = _fallback_to_name_matching(merged_df, manager_df)
         st.sidebar.write(f"🔍 Manager registry merge complete! Columns: {list(final_df.columns)}")
         st.sidebar.write(f"🔍 DENOM_SOCIAL exists after manager merge: {'DENOM_SOCIAL' in final_df.columns}")
         st.sidebar.write(f"🔍 MUN exists after manager merge: {'MUN' in final_df.columns}")
@@ -443,10 +522,24 @@ def process_cda_data(cda_zip_content, fund_df, manager_df, investment_types=None
             st.sidebar.write(f"🔍 Records with UF data: {uf_count} out of {len(final_df)}")
             st.sidebar.write(f"🔍 Name-based UF match rate: {uf_count/len(final_df)*100:.1f}%")
         
-        # Filter out records without managers (use only Gestor)
-        valid_df = final_df[
-            (final_df['CPF_CNPJ_Gestor'].notna() & (final_df['CPF_CNPJ_Gestor'] != 0))
-        ]
+        # Filter out records without managers
+        # Check which manager identification method was used
+        if 'Gestor_clean' in final_df.columns:
+            # Name-based matching path
+            valid_df = final_df[
+                (final_df['Gestor_clean'].notna() & (final_df['Gestor_clean'] != 'UNKNOWN MANAGER'))
+            ]
+            st.sidebar.write("🔍 Using Gestor_clean for filtering (name-based matching)")
+        elif 'DENOM_SOCIAL' in final_df.columns:
+            # CNPJ-based matching path - filter by DENOM_SOCIAL
+            valid_df = final_df[
+                (final_df['DENOM_SOCIAL'].notna() & (final_df['DENOM_SOCIAL'] != 'UNKNOWN MANAGER'))
+            ]
+            st.sidebar.write("🔍 Using DENOM_SOCIAL for filtering (CNPJ-based matching)")
+        else:
+            # Fallback - use all records
+            valid_df = final_df
+            st.sidebar.write("⚠️ No manager identification column found - using all records")
         
         # Debug: Show columns in valid_df
         st.sidebar.write(f"🔍 Valid_df columns: {list(valid_df.columns)}")
@@ -457,12 +550,53 @@ def process_cda_data(cda_zip_content, fund_df, manager_df, investment_types=None
             st.sidebar.write("❌ No valid records found!")
             return pd.DataFrame()
         
-        # Use only Gestor fields
-        valid_df['Manager_CNPJ'] = valid_df['CPF_CNPJ_Gestor']
-        valid_df['Manager_Name'] = valid_df['Gestor']
+        # Use manager names from the CNPJ chain matching
+        # The manager name should come from DENOM_SOCIAL after the CNPJ-based merge
+        st.sidebar.write(f"🔍 Available columns in valid_df: {list(valid_df.columns)}")
+        st.sidebar.write(f"🔍 DENOM_SOCIAL exists in valid_df: {'DENOM_SOCIAL' in valid_df.columns}")
+        
+        if 'DENOM_SOCIAL' in valid_df.columns:
+            # Check if DENOM_SOCIAL has actual values (not just NaN)
+            denom_social_count = valid_df['DENOM_SOCIAL'].notna().sum()
+            st.sidebar.write(f"🔍 DENOM_SOCIAL non-null count: {denom_social_count} out of {len(valid_df)}")
+            
+            if denom_social_count > 0:
+                valid_df['Manager_Name'] = valid_df['DENOM_SOCIAL']
+                st.sidebar.write("🔍 Using DENOM_SOCIAL for Manager_Name (from CNPJ chain)")
+            else:
+                st.sidebar.write("⚠️ DENOM_SOCIAL exists but has no values - falling back to Gestor")
+                # Fallback to Gestor if DENOM_SOCIAL has no values
+                gestor_col = None
+                for col in valid_df.columns:
+                    if 'Gestor' in col.upper():
+                        gestor_col = col
+                        break
+                
+                if gestor_col:
+                    valid_df['Manager_Name'] = valid_df[gestor_col]
+                    st.sidebar.write(f"🔍 Using {gestor_col} for Manager_Name (fallback)")
+                else:
+                    st.sidebar.write("⚠️ No Gestor column found - using 'Unknown Manager'")
+                    valid_df['Manager_Name'] = 'Unknown Manager'
+        else:
+            # Fallback to Gestor if DENOM_SOCIAL is not available
+            gestor_col = None
+            for col in valid_df.columns:
+                if 'Gestor' in col.upper():
+                    gestor_col = col
+                    break
+            
+            st.sidebar.write(f"🔍 Found Gestor column: {gestor_col}")
+            
+            if gestor_col:
+                valid_df['Manager_Name'] = valid_df[gestor_col]
+                st.sidebar.write(f"🔍 Using {gestor_col} for Manager_Name (fallback)")
+            else:
+                st.sidebar.write("⚠️ No Gestor column found - using 'Unknown Manager'")
+                valid_df['Manager_Name'] = 'Unknown Manager'
         
         # Group by manager to get total offshore assets per manager
-        manager_offshore = valid_df.groupby(['Manager_CNPJ', 'Manager_Name']).agg({
+        manager_offshore = valid_df.groupby('Manager_Name').agg({
             'VL_MERC_POS_FINAL': 'sum',
             'VL_CUSTO_POS_FINAL': 'sum',
             'CNPJ_FUNDO_CLASSE': 'count'
@@ -484,14 +618,14 @@ def process_cda_data(cda_zip_content, fund_df, manager_df, investment_types=None
             st.sidebar.write("🔍 Using DENOM_SOCIAL from manager registry for manager names")
         else:
             st.sidebar.write("⚠️ DENOM_SOCIAL not found - will use Manager_Name instead")
-            agg_dict['Manager_Name'] = 'first'
+            # Don't add Manager_Name to agg_dict since it's already the groupby key
         
         st.sidebar.write(f"🔍 Aggregation dictionary: {agg_dict}")
         
-        location_data = valid_df.groupby(['Manager_CNPJ']).agg(agg_dict).reset_index()
+        location_data = valid_df.groupby(['Manager_Name']).agg(agg_dict).reset_index()
         
         # Merge location data
-        manager_offshore = manager_offshore.merge(location_data, on='Manager_CNPJ', how='left')
+        manager_offshore = manager_offshore.merge(location_data, on='Manager_Name', how='left')
         
         # Rename columns
         rename_dict = {
@@ -529,7 +663,80 @@ def process_cda_data(cda_zip_content, fund_df, manager_df, investment_types=None
         
     except Exception as e:
         st.error(f"Error processing CDA data: {str(e)}")
+        st.sidebar.write(f"🔍 Full error details: {type(e).__name__}: {str(e)}")
+        import traceback
+        st.sidebar.write(f"🔍 Traceback: {traceback.format_exc()}")
         return pd.DataFrame()
+
+def _fallback_to_name_matching(merged_df, manager_df):
+    """Fallback to name-based matching when CNPJ matching fails"""
+    st.sidebar.write("🔄 Starting name-based matching fallback...")
+    
+    # Look for manager name column in merged_df
+    gestor_col = None
+    for col in merged_df.columns:
+        if 'GESTOR' in col.upper():
+            gestor_col = col
+            break
+    
+    if gestor_col:
+        st.sidebar.write(f"✅ Found manager name column: {gestor_col}")
+        # Clean manager names for matching
+        merged_df['Gestor_clean'] = merged_df[gestor_col].astype(str).str.strip().str.upper()
+    else:
+        st.sidebar.write("❌ No manager name column found in fund registry merge")
+        # If no manager data, create dummy columns
+        merged_df['Gestor'] = 'Unknown Manager'
+        merged_df['Gestor_clean'] = 'UNKNOWN MANAGER'
+    
+    # Clean manager names for matching
+    manager_df['DENOM_SOCIAL_clean'] = manager_df['DENOM_SOCIAL'].astype(str).str.strip().str.upper()
+    
+    # Debug: Show sample names
+    st.sidebar.write(f"Gestor name samples: {merged_df['Gestor_clean'].dropna().head(3).tolist()}")
+    st.sidebar.write(f"Manager Registry name samples: {manager_df['DENOM_SOCIAL_clean'].head(3).tolist()}")
+    
+    # Check for matches (name-based)
+    gestor_names = set(merged_df['Gestor_clean'].dropna())
+    manager_names = set(manager_df['DENOM_SOCIAL_clean'].dropna())
+    matches = gestor_names.intersection(manager_names)
+    st.sidebar.write(f"🔍 Name matches found: {len(matches)} out of {len(gestor_names)} gestor names")
+    if len(matches) > 0:
+        st.sidebar.write(f"🔍 Sample matches: {list(matches)[:3]}")
+    else:
+        st.sidebar.write("❌ No name matches found between gestor and manager registries!")
+    
+    # Merge with manager registry using NAME-BASED matching
+    final_df = merged_df.merge(
+        manager_df[['DENOM_SOCIAL_clean', 'DENOM_SOCIAL', 'MUN', 'UF', 'LOGRADOURO', 'BAIRRO', 'CEP']], 
+        left_on='Gestor_clean', 
+        right_on='DENOM_SOCIAL_clean', 
+        how='left',
+        suffixes=('', '_mgr')
+    )
+    
+    # Normalize columns after merge
+    if 'DENOM_SOCIAL_mgr' in final_df.columns:
+        final_df['DENOM_SOCIAL'] = final_df['DENOM_SOCIAL_mgr']
+    for _col in ['MUN', 'UF', 'LOGRADOURO', 'BAIRRO', 'CEP']:
+        mgr_col = f"{_col}_mgr"
+        if mgr_col in final_df.columns:
+            final_df[_col] = final_df[mgr_col]
+    
+    # Debug: Check name-based matching results
+    if 'DENOM_SOCIAL' in final_df.columns:
+        name_matches = final_df['DENOM_SOCIAL'].notna().sum()
+        st.sidebar.write(f"🔍 Name-based matches found: {name_matches} out of {len(final_df)} records")
+        if name_matches > 0:
+            st.sidebar.write(f"🔍 Sample matched manager names: {final_df['DENOM_SOCIAL'].dropna().head(3).tolist()}")
+        else:
+            st.sidebar.write("❌ No name-based matches found - all managers will be 'Unknown Manager'")
+    else:
+        st.sidebar.write("❌ DENOM_SOCIAL column not found in final_df - all managers will be 'Unknown Manager'")
+        # Add DENOM_SOCIAL column with Unknown Manager values
+        final_df['DENOM_SOCIAL'] = 'Unknown Manager'
+    
+    return final_df
 
 def main():
     # Header
@@ -765,9 +972,23 @@ def main():
         st.subheader("🗺️ Geographic Distribution")
         
         # State distribution
+        # Use the correct manager name column (same logic as other parts of the code)
+        manager_name_col = None
+        if 'DENOM_SOCIAL' in filtered_df.columns:
+            manager_name_col = 'DENOM_SOCIAL'
+        elif 'Manager_Name_x' in filtered_df.columns:
+            manager_name_col = 'Manager_Name_x'
+        elif 'Manager_Name_y' in filtered_df.columns:
+            manager_name_col = 'Manager_Name_y'
+        elif 'Manager_Name' in filtered_df.columns:
+            manager_name_col = 'Manager_Name'
+        else:
+            st.error(f"No manager name column found for geographic distribution! Available columns: {list(filtered_df.columns)}")
+            return
+        
         state_dist = filtered_df.groupby('UF').agg({
             'Total_Offshore_Assets_Market_Value': 'sum',
-            'Manager_CNPJ': 'count'  # Use Manager_CNPJ for counting managers
+            manager_name_col: 'count'  # Use the correct manager name column for counting managers
         }).reset_index()
         state_dist.columns = ['State', 'Total_Assets', 'Number_of_Managers']
         
